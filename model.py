@@ -4,11 +4,15 @@ import pickle
 from zipfile import ZipFile
 import pandas as pd
 from sklearn.kernel_ridge import KernelRidge
-from sklearn.linear_model import BayesianRidge, LinearRegression
+from sklearn.linear_model import BayesianRidge, LinearRegression, Ridge, Lasso, HuberRegressor, TheilSenRegressor, QuantileRegressor
 from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+from sklearn.linear_model import ElasticNet
 from updater import download_binance_daily_data, download_binance_current_day_data, download_coingecko_data, download_coingecko_current_day_data
 from config import data_base_path, model_file_path, TOKEN, MODEL, CG_API_KEY
-
 
 binance_data_path = os.path.join(data_base_path, "binance")
 coingecko_data_path = os.path.join(data_base_path, "coingecko")
@@ -19,6 +23,7 @@ def download_data_binance(token, training_days, region):
     files = download_binance_daily_data(f"{token}USDT", training_days, region, binance_data_path)
     print(f"Downloaded {len(files)} new files")
     return files
+
 
 def download_data_coingecko(token, training_days):
     files = download_coingecko_data(token, training_days, coingecko_data_path, CG_API_KEY)
@@ -33,7 +38,8 @@ def download_data(token, training_days, region, data_provider):
         return download_data_binance(token, training_days, region)
     else:
         raise ValueError("Unsupported data provider")
-    
+
+
 def format_data(files, data_provider):
     if not files:
         print("Already up to date")
@@ -44,7 +50,6 @@ def format_data(files, data_provider):
     elif data_provider == "coingecko":
         files = sorted([x for x in os.listdir(coingecko_data_path) if x.endswith(".json")])
 
-    # No files to process
     if len(files) == 0:
         return
 
@@ -52,7 +57,6 @@ def format_data(files, data_provider):
     if data_provider == "binance":
         for file in files:
             zip_file_path = os.path.join(binance_data_path, file)
-
             if not zip_file_path.endswith(".zip"):
                 continue
 
@@ -62,17 +66,8 @@ def format_data(files, data_provider):
                 header = 0 if line.decode("utf-8").startswith("open_time") else None
             df = pd.read_csv(myzip.open(myzip.filelist[0]), header=header).iloc[:, :11]
             df.columns = [
-                "start_time",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "end_time",
-                "volume_usd",
-                "n_trades",
-                "taker_volume",
-                "taker_volume_usd",
+                "start_time", "open", "high", "low", "close", "volume", "end_time", "volume_usd",
+                "n_trades", "taker_volume", "taker_volume_usd"
             ]
             df.index = [pd.Timestamp(x + 1, unit="ms").to_datetime64() for x in df["end_time"]]
             df.index.name = "date"
@@ -84,13 +79,7 @@ def format_data(files, data_provider):
             with open(os.path.join(coingecko_data_path, file), "r") as f:
                 data = json.load(f)
                 df = pd.DataFrame(data)
-                df.columns = [
-                    "timestamp",
-                    "open",
-                    "high",
-                    "low",
-                    "close"
-                ]
+                df.columns = ["timestamp", "open", "high", "low", "close"]
                 df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
                 df.drop(columns=["timestamp"], inplace=True)
                 df.set_index("date", inplace=True)
@@ -101,13 +90,13 @@ def format_data(files, data_provider):
 
 def load_frame(frame, timeframe):
     print(f"Loading data...")
-    df = frame.loc[:,['open','high','low','close']].dropna()
-    df[['open','high','low','close']] = df[['open','high','low','close']].apply(pd.to_numeric)
+    df = frame.loc[:, ['open', 'high', 'low', 'close']].dropna()
+    df[['open', 'high', 'low', 'close']] = df[['open', 'high', 'low', 'close']].apply(pd.to_numeric)
     df['date'] = frame['date'].apply(pd.to_datetime)
     df.set_index('date', inplace=True)
     df.sort_index(inplace=True)
-
     return df.resample(f'{timeframe}', label='right', closed='right', origin='end').mean()
+
 
 def train_model(timeframe):
     # Load the price data
@@ -121,19 +110,38 @@ def train_model(timeframe):
 
     print(f"Training data shape: {X_train.shape}, {y_train.shape}")
 
-    # Define the model
+    # Define the model based on the provided `MODEL`
     if MODEL == "LinearRegression":
         model = LinearRegression()
+    elif MODEL == "Ridge":
+        model = Ridge()
+    elif MODEL == "Lasso":
+        model = Lasso()
+    elif MODEL == "ElasticNet":
+        model = ElasticNet()
+    elif MODEL == "DecisionTreeRegressor":
+        model = DecisionTreeRegressor()
+    elif MODEL == "RandomForestRegressor":
+        model = RandomForestRegressor()
+    elif MODEL == "GradientBoostingRegressor":
+        model = GradientBoostingRegressor()
+    elif MODEL == "AdaBoostRegressor":
+        model = AdaBoostRegressor()
+    elif MODEL == "HuberRegressor":
+        model = HuberRegressor()
+    elif MODEL == "TheilSenRegressor":
+        model = TheilSenRegressor()
+    elif MODEL == "QuantileRegressor":
+        model = QuantileRegressor()
     elif MODEL == "SVR":
         model = SVR()
     elif MODEL == "KernelRidge":
         model = KernelRidge()
     elif MODEL == "BayesianRidge":
         model = BayesianRidge()
-    # Add more models here
     else:
         raise ValueError("Unsupported model")
-    
+
     # Train the model
     model.fit(X_train, y_train)
 
